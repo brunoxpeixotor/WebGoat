@@ -4,17 +4,18 @@
  */
 package org.owasp.webgoat.lessons.sqlinjection.introduction;
 
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
-
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -46,16 +47,15 @@ public class SqlInjectionLesson10 implements AssignmentEndpoint {
 
   protected AttackResult injectableQueryAvailability(String action) {
     StringBuilder output = new StringBuilder();
-    String query = "SELECT * FROM access_log WHERE action LIKE '%" + action + "%'";
+    String query = "SELECT * FROM access_log WHERE action LIKE ?";
 
     try (Connection connection = dataSource.getConnection()) {
       try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        ResultSet results = statement.executeQuery(query);
+        PreparedStatement ps = connection.prepareStatement(query, ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+        ps.setString(1, "%" + action + "%");
+        ResultSet results = ps.executeQuery();
 
-        if (results.getStatement() != null) {
+        if (results != null && results.getStatement() != null) {
           results.first();
           output.append(SqlInjectionLesson8.generateTable(results));
           return failed(this)
@@ -85,7 +85,6 @@ public class SqlInjectionLesson10 implements AssignmentEndpoint {
           return success(this).feedback("sql-injection.10.success").build();
         }
       }
-
     } catch (Exception e) {
       return failed(this)
           .output("<span class='feedback-negative'>" + e.getMessage() + "</span>")

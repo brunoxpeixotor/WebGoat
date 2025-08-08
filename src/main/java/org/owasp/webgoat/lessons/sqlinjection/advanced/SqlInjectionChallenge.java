@@ -4,20 +4,24 @@
  */
 package org.owasp.webgoat.lessons.sqlinjection.advanced;
 
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.informationMessage;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 
-import java.sql.*;
-import lombok.extern.slf4j.Slf4j;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.informationMessage;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
 @AssignmentHints(
@@ -49,24 +53,25 @@ public class SqlInjectionChallenge implements AssignmentEndpoint {
     AttackResult attackResult = checkArguments(username, email, password);
 
     if (attackResult == null) {
-
       try (Connection connection = dataSource.getConnection()) {
-        String checkUserQuery =
-            "select userid from sql_challenge_users where userid = '" + username + "'";
-        Statement statement = connection.createStatement();
-        ResultSet resultSet = statement.executeQuery(checkUserQuery);
-
-        if (resultSet.next()) {
-          attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
-        } else {
-          PreparedStatement preparedStatement =
-              connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)");
-          preparedStatement.setString(1, username);
-          preparedStatement.setString(2, email);
-          preparedStatement.setString(3, password);
-          preparedStatement.execute();
-          attackResult =
-              informationMessage(this).feedback("user.created").feedbackArgs(username).build();
+        String checkUserQuery = "select userid from sql_challenge_users where userid = ?";
+        try (PreparedStatement ps = connection.prepareStatement(checkUserQuery)) {
+          ps.setString(1, username);
+          try (ResultSet resultSet = ps.executeQuery()) {
+            if (resultSet.next()) {
+              attackResult = failed(this).feedback("user.exists").feedbackArgs(username).build();
+            } else {
+              try (PreparedStatement preparedStatement =
+                       connection.prepareStatement("INSERT INTO sql_challenge_users VALUES (?, ?, ?)") ) {
+                preparedStatement.setString(1, username);
+                preparedStatement.setString(2, email);
+                preparedStatement.setString(3, password);
+                preparedStatement.execute();
+                attackResult =
+                    informationMessage(this).feedback("user.created").feedbackArgs(username).build();
+              }
+            }
+          }
         }
       } catch (SQLException e) {
         attackResult = failed(this).output("Something went wrong").build();

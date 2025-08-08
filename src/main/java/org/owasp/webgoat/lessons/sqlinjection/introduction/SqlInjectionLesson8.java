@@ -4,18 +4,20 @@
  */
 package org.owasp.webgoat.lessons.sqlinjection.introduction;
 
-import static java.sql.ResultSet.CONCUR_UPDATABLE;
-import static java.sql.ResultSet.TYPE_SCROLL_SENSITIVE;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
-
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
+
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -46,50 +48,37 @@ public class SqlInjectionLesson8 implements AssignmentEndpoint {
 
   protected AttackResult injectableQueryConfidentiality(String name, String auth_tan) {
     StringBuilder output = new StringBuilder();
-    String query =
-        "SELECT * FROM employees WHERE last_name = '"
-            + name
-            + "' AND auth_tan = '"
-            + auth_tan
-            + "'";
-
+    String query = "SELECT * FROM employees WHERE last_name = ? AND auth_tan = ?";
     try (Connection connection = dataSource.getConnection()) {
-      try {
-        Statement statement =
-            connection.createStatement(
-                ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_UPDATABLE);
-        log(connection, query);
-        ResultSet results = statement.executeQuery(query);
-
-        if (results.getStatement() != null) {
-          if (results.first()) {
-            output.append(generateTable(results));
-            results.last();
-
-            if (results.getRow() > 1) {
-              // more than one record, the user succeeded
-              return success(this)
-                  .feedback("sql-injection.8.success")
-                  .output(output.toString())
-                  .build();
+      try (PreparedStatement ps = connection.prepareStatement(query, ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_UPDATABLE)) {
+        ps.setString(1, name);
+        ps.setString(2, auth_tan);
+        log(connection, query + " [name=" + name + ", auth_tan=" + auth_tan + "]");
+        try (ResultSet results = ps.executeQuery()) {
+          if (results != null && results.getStatement() != null) {
+            if (results.first()) {
+              output.append(generateTable(results));
+              results.last();
+              if (results.getRow() > 1) {
+                return success(this)
+                    .feedback("sql-injection.8.success")
+                    .output(output.toString())
+                    .build();
+              } else {
+                return failed(this).feedback("sql-injection.8.one").output(output.toString()).build();
+              }
             } else {
-              // only one record
-              return failed(this).feedback("sql-injection.8.one").output(output.toString()).build();
+              return failed(this).feedback("sql-injection.8.no.results").build();
             }
-
           } else {
-            // no results
-            return failed(this).feedback("sql-injection.8.no.results").build();
+            return failed(this).build();
           }
-        } else {
-          return failed(this).build();
         }
-      } catch (SQLException e) {
-        return failed(this)
-            .output("<br><span class='feedback-negative'>" + e.getMessage() + "</span>")
-            .build();
       }
-
+    } catch (SQLException e) {
+      return failed(this)
+          .output("<br><span class='feedback-negative'>" + e.getMessage() + "</span>")
+          .build();
     } catch (Exception e) {
       return failed(this)
           .output("<br><span class='feedback-negative'>" + e.getMessage() + "</span>")
@@ -106,40 +95,36 @@ public class SqlInjectionLesson8 implements AssignmentEndpoint {
 
     if (results.next()) {
       table.append("<tr>");
-      for (int i = 1; i < (numColumns + 1); i++) {
-        table.append("<th>" + resultsMetaData.getColumnName(i) + "</th>");
+      for (int i = 1; i <= numColumns; i++) {
+        table.append("<th>").append(resultsMetaData.getColumnName(i)).append("</th>");
       }
       table.append("</tr>");
 
       results.beforeFirst();
       while (results.next()) {
         table.append("<tr>");
-        for (int i = 1; i < (numColumns + 1); i++) {
-          table.append("<td>" + results.getString(i) + "</td>");
+        for (int i = 1; i <= numColumns; i++) {
+          table.append("<td>").append(results.getString(i)).append("</td>");
         }
         table.append("</tr>");
       }
-
     } else {
       table.append("Query Successful; however no data was returned from this query.");
     }
 
     table.append("</table>");
-    return (table.toString());
+    return table.toString();
   }
 
   public static void log(Connection connection, String action) {
-    action = action.replace('\'', '"');
     Calendar cal = Calendar.getInstance();
     SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
     String time = sdf.format(cal.getTime());
-
-    String logQuery =
-        "INSERT INTO access_log (time, action) VALUES ('" + time + "', '" + action + "')";
-
-    try {
-      Statement statement = connection.createStatement(TYPE_SCROLL_SENSITIVE, CONCUR_UPDATABLE);
-      statement.executeUpdate(logQuery);
+    String logQuery = "INSERT INTO access_log (time, action) VALUES (?, ?)";
+    try (PreparedStatement ps = connection.prepareStatement(logQuery)) {
+      ps.setString(1, time);
+      ps.setString(2, action);
+      ps.executeUpdate();
     } catch (SQLException e) {
       System.err.println(e.getMessage());
     }

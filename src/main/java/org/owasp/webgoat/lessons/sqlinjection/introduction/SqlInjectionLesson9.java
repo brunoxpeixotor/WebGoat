@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.PreparedStatement;
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
@@ -47,35 +48,25 @@ public class SqlInjectionLesson9 implements AssignmentEndpoint {
 
   protected AttackResult injectableQueryIntegrity(String name, String auth_tan) {
     StringBuilder output = new StringBuilder();
-    String queryInjection =
-        "SELECT * FROM employees WHERE last_name = '"
-            + name
-            + "' AND auth_tan = '"
-            + auth_tan
-            + "'";
+    String query = "SELECT * FROM employees WHERE last_name = ? AND auth_tan = ?";
     try (Connection connection = dataSource.getConnection()) {
-      // V2019_09_26_7__employees.sql
       int oldMaxSalary = this.getMaxSalary(connection);
       int oldSumSalariesOfOtherEmployees = this.getSumSalariesOfOtherEmployees(connection);
-      // begin transaction
       connection.setAutoCommit(false);
-      // do injectable query
-      Statement statement = connection.createStatement(TYPE_SCROLL_SENSITIVE, CONCUR_UPDATABLE);
-      SqlInjectionLesson8.log(connection, queryInjection);
-      statement.execute(queryInjection);
-      // check new sum of salaries other employees and new salaries of John
+      try (PreparedStatement ps = connection.prepareStatement(query, TYPE_SCROLL_SENSITIVE, CONCUR_UPDATABLE)) {
+        ps.setString(1, name);
+        ps.setString(2, auth_tan);
+        SqlInjectionLesson8.log(connection, query);
+        ps.execute();
+      }
       int newJohnSalary = this.getJohnSalary(connection);
       int newSumSalariesOfOtherEmployees = this.getSumSalariesOfOtherEmployees(connection);
-      if (newJohnSalary > oldMaxSalary
-          && newSumSalariesOfOtherEmployees == oldSumSalariesOfOtherEmployees) {
-        // success commit
-        connection.commit(); // need execute not executeQuery
+      if (newJohnSalary > oldMaxSalary && newSumSalariesOfOtherEmployees == oldSumSalariesOfOtherEmployees) {
+        connection.commit();
         connection.setAutoCommit(true);
-        output.append(
-            SqlInjectionLesson8.generateTable(this.getEmployeesDataOrderBySalaryDesc(connection)));
+        output.append(SqlInjectionLesson8.generateTable(this.getEmployeesDataOrderBySalaryDesc(connection)));
         return success(this).feedback("sql-injection.9.success").output(output.toString()).build();
       }
-      // failed roolback
       connection.rollback();
       return failed(this)
           .feedback("sql-injection.9.one")

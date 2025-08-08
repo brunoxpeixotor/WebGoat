@@ -4,19 +4,17 @@
  */
 package org.owasp.webgoat.lessons.sqlinjection.introduction;
 
-import static java.sql.ResultSet.CONCUR_READ_ONLY;
-import static java.sql.ResultSet.TYPE_SCROLL_INSENSITIVE;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
-
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
+
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -36,23 +34,40 @@ public class SqlInjectionLesson4 implements AssignmentEndpoint {
   @PostMapping("/SqlInjection/attack4")
   @ResponseBody
   public AttackResult completed(@RequestParam String query) {
-    return injectableQuery(query);
+    // Validação simples do parâmetro
+    if (query == null || query.trim().isEmpty()) {
+      return failed(this).output("Parâmetro inválido").build();
+    }
+    return injectableQuery(query.trim());
   }
 
   protected AttackResult injectableQuery(String query) {
     try (Connection connection = dataSource.getConnection()) {
-      try (Statement statement =
-          connection.createStatement(TYPE_SCROLL_INSENSITIVE, CONCUR_READ_ONLY)) {
-        statement.executeUpdate(query);
-        connection.commit();
-        ResultSet results = statement.executeQuery("SELECT phone from employees;");
-        StringBuilder output = new StringBuilder();
-        // user completes lesson if column phone exists
-        if (results.first()) {
-          output.append("<span class='feedback-positive'>" + query + "</span>");
-          return success(this).output(output.toString()).build();
+      String updateQuery = "UPDATE employees SET phone = ? WHERE last_name = ?";
+      try (PreparedStatement ps = connection.prepareStatement(updateQuery)) {
+        // Exemplo: query esperado: "UPDATE employees SET phone = '123' WHERE last_name = 'Smith'"
+        // Aqui, para fins didáticos, vamos simular a extração dos parâmetros (em produção, use parser SQL ou lógica robusta)
+        String[] parts = query.split("'");
+        if (parts.length >= 4) {
+          String phone = parts[1];
+          String lastName = parts[3];
+          ps.setString(1, phone);
+          ps.setString(2, lastName);
+          ps.executeUpdate();
+          connection.commit();
         } else {
-          return failed(this).output(output.toString()).build();
+          return failed(this).output("Formato de query inválido").build();
+        }
+        try (PreparedStatement ps2 = connection.prepareStatement("SELECT phone from employees WHERE last_name = ?")) {
+          ps2.setString(1, parts.length >= 4 ? parts[3] : "");
+          ResultSet results = ps2.executeQuery();
+          StringBuilder output = new StringBuilder();
+          if (results.first()) {
+            output.append("<span class='feedback-positive'>").append(query).append("</span>");
+            return success(this).output(output.toString()).build();
+          } else {
+            return failed(this).output(output.toString()).build();
+          }
         }
       } catch (SQLException sqle) {
         return failed(this).output(sqle.getMessage()).build();

@@ -4,21 +4,21 @@
  */
 package org.owasp.webgoat.lessons.sqlinjection.introduction;
 
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
-import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
-
-import jakarta.annotation.PostConstruct;
 import java.sql.Connection;
-import java.sql.ResultSet;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Statement;
+
 import org.owasp.webgoat.container.LessonDataSource;
 import org.owasp.webgoat.container.assignments.AssignmentEndpoint;
 import org.owasp.webgoat.container.assignments.AssignmentHints;
 import org.owasp.webgoat.container.assignments.AttackResult;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.failed;
+import static org.owasp.webgoat.container.assignments.AttackResultBuilder.success;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+
+import jakarta.annotation.PostConstruct;
 
 @RestController
 @AssignmentHints(
@@ -59,14 +59,23 @@ public class SqlInjectionLesson5 implements AssignmentEndpoint {
 
   protected AttackResult injectableQuery(String query) {
     try (Connection connection = dataSource.getConnection()) {
-      try (Statement statement =
-          connection.createStatement(
-              ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_UPDATABLE)) {
-        statement.executeQuery(query);
+      // Exemplo: query esperado: "GRANT SELECT ON grant_rights TO unauthorized_user"
+      // Aqui, para fins didáticos, vamos simular a extração dos parâmetros (em produção, use parser SQL ou lógica robusta)
+      String[] parts = query.split(" ");
+      if (parts.length >= 6 && "GRANT".equalsIgnoreCase(parts[0]) && "ON".equalsIgnoreCase(parts[2]) && "TO".equalsIgnoreCase(parts[4])) {
+        String permission = parts[1];
+        String table = parts[3];
+        String user = parts[5];
+        String grantQuery = "GRANT " + permission + " ON " + table + " TO " + user;
+        try (PreparedStatement ps = connection.prepareStatement(grantQuery)) {
+          ps.execute();
+        }
         if (checkSolution(connection)) {
           return success(this).build();
         }
         return failed(this).output("Your query was: " + query).build();
+      } else {
+        return failed(this).output("Formato de query inválido").build();
       }
     } catch (Exception e) {
       return failed(this)
